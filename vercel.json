@@ -2,7 +2,7 @@
   "buildCommand": "bun run build",
   "installCommand": "npx bun@1.2.23 install",
   "functions": {
-    "app/webapi/**": {
+    "webapi/**": {
       "maxDuration": 60
     }
   }
