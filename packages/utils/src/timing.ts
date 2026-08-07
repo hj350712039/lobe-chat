@@ -1,5 +1,7 @@
 import debug from 'debug';
 
+import { isRecord, pickString } from './object';
+
 export interface TimingContext {
   requestId: string;
   startedAt: number;
@@ -24,12 +26,21 @@ export const createDebugTimingLogger = (namespace: string): TimingLogger => debu
 
 export const getDurationMs = (startedAt: number) => Date.now() - startedAt;
 
+export const formatElapsedClockTime = (ms: number) => {
+  const normalizedMs = Math.max(0, ms);
+  const totalSeconds = Math.floor(normalizedMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const mm = String(minutes).padStart(2, '0');
+  const ss = String(seconds).padStart(2, '0');
+
+  return hours > 0 ? `${hours}:${mm}:${ss}` : `${mm}:${ss}`;
+};
+
 export const createTimingRequestId = () =>
   globalThis.crypto?.randomUUID?.() ??
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  !!value && typeof value === 'object';
 
 export const getTimingErrorMetadata = (error: unknown): TimingMetadata => {
   if (error instanceof Error) {
@@ -41,7 +52,7 @@ export const getTimingErrorMetadata = (error: unknown): TimingMetadata => {
 
   if (isRecord(error)) {
     return {
-      errorType: typeof error.errorType === 'string' ? error.errorType : undefined,
+      errorType: pickString(error.errorType),
       status: typeof error.status === 'number' ? error.status : undefined,
     };
   }
@@ -77,6 +88,31 @@ export const logTimingSink = (
   metadata?: TimingMetadata,
 ) => {
   timing?.log(event, metadata);
+};
+
+export const markTimingStageDone = (
+  logger: TimingLogger,
+  context: TimingContext | undefined,
+  stage: string,
+  metadata?: TimingMetadata,
+) => {
+  if (!context) return;
+
+  logTiming(logger, context, `${stage}:done`, {
+    ...metadata,
+    stageMs: 0,
+  });
+};
+
+export const markTimingSinkStageDone = (
+  timing: TimingSink | undefined,
+  stage: string,
+  metadata?: TimingMetadata,
+) => {
+  logTimingSink(timing, `${stage}:done`, {
+    ...metadata,
+    stageMs: 0,
+  });
 };
 
 export const runTimedStage = async <T>(
@@ -162,6 +198,8 @@ export const createTimingHelpers = (namespace: string) => {
     logger,
     logTiming: (context: TimingContext | undefined, event: string, metadata?: TimingMetadata) =>
       logTiming(logger, context, event, metadata),
+    markStageDone: (context: TimingContext | undefined, stage: string, metadata?: TimingMetadata) =>
+      markTimingStageDone(logger, context, stage, metadata),
     runTimedStage: <T>(
       context: TimingContext | undefined,
       stage: string,

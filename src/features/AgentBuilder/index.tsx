@@ -28,6 +28,8 @@ const AgentBuilder = memo(() => {
 
   return (
     <RightPanel
+      stableLayout
+      collapseThreshold={320}
       defaultWidth={width}
       expand={showAgentBuilderPanel}
       onExpandChange={toggleAgentBuilderPanel}
@@ -39,7 +41,7 @@ const AgentBuilder = memo(() => {
       }}
     >
       {agentId && agentBuilderId ? (
-        <AgentBuilderProvider agentId={agentBuilderId}>
+        <AgentBuilderProvider agentId={agentBuilderId} editingAgentId={agentId}>
           <AgentBuilderConversation agentId={agentBuilderId} />
         </AgentBuilderProvider>
       ) : (

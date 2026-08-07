@@ -4,29 +4,41 @@ import type { GrepContentParams, GrepContentResult } from '../types';
 import { expandTilde } from './expandTilde';
 import { hasHiddenSegment } from './hasHiddenSegment';
 
+/**
+ * Lightweight grep — spawns `rg` directly. For the platform-aware fallback
+ * chain (rg → ag → grep → nodejs) with rich `output_mode` / `-A/-B/-C` support, use
+ * `createContentSearchImpl()` from `@lobechat/local-file-shell/contentSearch`.
+ */
 export async function grepContent({
   pattern,
   cwd,
   filePattern,
+  output_mode = 'files_with_matches',
 }: GrepContentParams): Promise<GrepContentResult> {
-  // When the filePattern explicitly references a dot-prefixed segment, the
-  // caller wants to scan inside a hidden directory — pass `--hidden` to rg so
-  // it doesn't silently skip these paths. We still rely on rg's built-in
-  // `.git/` exclusion via .gitignore semantics, plus add an explicit guard.
   const wantsHidden = hasHiddenSegment(filePattern);
   const hint = wantsHidden
     ? `Auto-enabled hidden-file matching because filePattern contains a dot-prefixed segment.`
     : undefined;
 
   return new Promise<GrepContentResult>((resolve) => {
-    const args = ['--json', '-n'];
+    const args = ['--color=never', '--no-heading', '--with-filename', '--max-columns', '500'];
     if (wantsHidden) {
       args.push('--hidden', '--glob', '!**/.git/**');
     }
+    if (output_mode === 'files_with_matches') {
+      args.push('--files-with-matches');
+    } else if (output_mode === 'count') {
+      args.push('--count');
+    } else {
+      args.push('--line-number', '--column');
+    }
     if (filePattern) args.push('--glob', filePattern);
-    args.push(pattern);
+    args.push(pattern, '.');
 
-    const child = spawn('rg', args, { cwd: expandTilde(cwd) || process.cwd() });
+    const child = spawn('rg', args, {
+      cwd: expandTilde(cwd) || process.cwd(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let stdout = '';
 
     child.stdout?.on('data', (data) => {
@@ -38,31 +50,30 @@ export async function grepContent({
 
     child.on('close', (code) => {
       if (code !== 0 && code !== 1) {
-        resolve({ hint, matches: [], success: false });
+        resolve({ engine: 'rg', hint, matches: [], success: false, total_matches: 0 });
         return;
       }
 
-      try {
-        const matches = stdout
-          .split('\n')
-          .filter(Boolean)
-          .map((line) => {
-            try {
-              return JSON.parse(line);
-            } catch {
-              return null;
-            }
-          })
-          .filter(Boolean);
+      const matches = stdout.split('\n').filter(Boolean);
+      const totalMatches =
+        output_mode === 'count'
+          ? matches.reduce((sum, line) => {
+              const count = Number.parseInt(line.slice(line.lastIndexOf(':') + 1), 10);
+              return sum + (Number.isNaN(count) ? 0 : count);
+            }, 0)
+          : matches.length;
 
-        resolve({ hint, matches, success: true });
-      } catch {
-        resolve({ hint, matches: [], success: true });
-      }
+      resolve({
+        engine: 'rg',
+        hint,
+        matches,
+        success: true,
+        total_matches: totalMatches,
+      });
     });
 
     child.on('error', () => {
-      resolve({ hint, matches: [], success: false });
+      resolve({ engine: 'rg', hint, matches: [], success: false, total_matches: 0 });
     });
   });
 }
